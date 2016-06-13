@@ -1,0 +1,8 @@
+Got tick
+  State is: StdRobo { health: 100, pos: SerVector2(Vector2 [0, 0]) }
+Got tick
+  State is: StdRobo { health: 100, pos: SerVector2(Vector2 [0, 0]) }
+Got tick
+  State is: StdRobo { health: 100, pos: SerVector2(Vector2 [0, 0]) }
+Got tick
+  State is: StdRobo { health: 100, pos: SerVector2(Vector2 [0, 0]) }
