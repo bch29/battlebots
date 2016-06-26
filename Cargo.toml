@@ -4,10 +4,9 @@ version = "0.1.0"
 authors = ["brad <bradleyhardy@live.com>"]
 
 [dependencies]
-cgmath = "0.10.0"
+cgmath = "*"
 serde = "*"
 serde_json = "*"
-schedule_recv = "*"
 glium = "*"
 rand = "*"
 crossbeam = "*"

@@ -7,4 +7,4 @@ authors = ["brad <bradleyhardy@live.com>"]
 cgmath = "*"
 serde = "*"
 serde_json = "*"
-serde_macros = "0.7.10"
+serde_macros = "*"
