@@ -1,20 +1,15 @@
 [package]
-name = "robo2"
+name = "battlebots"
 version = "0.1.0"
 authors = ["brad <bradleyhardy@live.com>"]
-# build = "build.rs"
-
-# [features]
-# default = ["serde_codegen"]
-# nightly = ["serde_macros"]
-
-# [build-dependencies]
-# serde_codegen = { version = "*", optional = true }
-# syntex = "*"
 
 [dependencies]
-cgmath = "*"
+cgmath = "0.10.0"
 serde = "*"
 serde_json = "*"
-serde_macros = { version = "0.7.10", optional = false }
 schedule_recv = "*"
+glium = "*"
+rand = "*"
+crossbeam = "*"
+render_utils = { version = "*", path = "render_utils" }
+battlebots_support = { version = "*", path = "support" }

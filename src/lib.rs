@@ -1,15 +1,22 @@
-#![feature(custom_derive, plugin)]
-#![plugin(serde_macros)]
-#![feature(mpsc_select)]
-
 extern crate cgmath;
 extern crate serde;
 extern crate serde_json;
+#[macro_use]
+extern crate glium;
+extern crate crossbeam;
 
+extern crate render_utils;
+extern crate battlebots_support;
+
+pub mod ctl;
 pub mod robo;
-// pub mod std_robo;
-// pub mod external_robo;
-// pub mod robo_controller;
+pub mod world;
+pub mod render;
+pub mod threading;
+
+pub use battlebots_support::math;
+pub use battlebots_support::config;
+pub use battlebots_support::rpc;
 
 #[cfg(test)]
 mod tests {

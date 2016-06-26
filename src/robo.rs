@@ -1,125 +1,127 @@
-use std::sync::mpsc::{channel, Sender, Receiver, SendError, RecvError, TryRecvError};
-use std::marker::PhantomData;
+use config::Config;
+use world::{TickLock};
+use ctl::RoboCtl;
+
+use std::sync::{Arc, Mutex};
+use std::sync::mpsc::{Sender, Receiver, channel};
+
 use std::thread;
 
-/// A controller for an asynchronous robot, whose behaviour is determined by the
-/// `Ctl` type.
-pub struct Robo<Ctl: AsyncRobo> {
-    _marker: PhantomData<Ctl>,
-    input_out: Sender<Ctl::Input>,
-    output_in: Receiver<Ctl::Output>,
-    stopper: RoboStopper,
-    join_handle: thread::JoinHandle<()>,
+use std::time::Instant;
+
+#[derive(Debug)]
+struct State<Ctl: RoboCtl> {
+    ctl: Ctl,
+    msg_in: Receiver<Message>,
+    msg_out: Sender<Message>,
 }
 
-#[derive(Debug, Clone)]
-pub struct RoboStopper {
-    stop_out: Sender<()>,
+/// An asynchronous robot, whose behaviour is determined by the `Ctl` type.
+pub struct Robo<Ctl: RoboCtl> {
+    config: Config,
+    state: Mutex<State<Ctl>>,
 }
 
-impl RoboStopper {
-    /// Asynchronously stops the robot's execution as soon as currently buffered
-    /// input messages have finished being handled. After one call to `stop()`,
-    /// subsequent calls have no effect.
-    pub fn stop(&self) {
-        let _ = self.stop_out.send(());
-    }
+#[derive(Debug)]
+pub enum Error<Ctl: RoboCtl> {
+    StatePoisoned,
+    WorldPoisoned,
+    Ctl(Ctl::Error),
 }
 
-pub trait AsyncRobo: Send + 'static {
-    /// The type of input messages that this robot can receive.
-    type Input: Send;
-
-    /// The type of output messages that this robot can send.
-    type Output: Send;
-
-    /// Handle a single input message, and optionally return a response to be
-    /// sent to the owner of the controlling `Robo`.
-    fn handle_input(&mut self, input: Self::Input) -> Option<Self::Output>;
+#[derive(Debug)]
+pub enum StateError {
+    Poisoned
 }
 
-impl<Ctl: AsyncRobo> Robo<Ctl> {
-    /// Create a Robo with the given controller and start it in its own thread.
-    pub fn new(ctl: Ctl) -> Self {
-        let (input_out, input_in) = channel();
-        let (output_out, output_in) = channel();
-        let (stop_out, stop_in) = channel();
+#[derive(Debug)]
+pub enum Message {
+    Shutdown,
+}
 
-        let stopper = RoboStopper { stop_out: stop_out };
-
-        let join_handle = thread::spawn(move|| {
-            let mut s = ctl;
-
-            loop {
-                select! {
-                    _ = stop_in.recv() => break,
-                    input = input_in.recv() =>
-                        if let Ok(input) = input {
-                            match s.handle_input(input) {
-                                Some(output) =>
-                                    if let Err(_) = output_out.send(output) {
-                                        break
-                                    },
-                                None => (),
-                            }
-                        } else { break }
-                }
-            }
-        });
+impl<Ctl: RoboCtl> Robo<Ctl> {
+    /// Creates a new robot in the given world. Requires taking a write lock on
+    /// the world and thus may fail if the world's lock in poisoned.
+    pub fn new(config: Config, ctl: Ctl) -> Self {
+        let (msg_out, msg_in) = channel();
 
         Robo {
-            _marker: PhantomData,
-            input_out: input_out,
-            output_in: output_in,
-            stopper: stopper,
-            join_handle: join_handle,
+            config: config,
+            state: Mutex::new(State { ctl: ctl, msg_in: msg_in, msg_out: msg_out }),
         }
     }
 
-    /// Gets a copy of the sender that can be used to send inputs to the robot
-    /// without having access to the `Robo` itself.
-    pub fn input_sender(&self) -> Sender<Ctl::Input> {
-        self.input_out.clone()
+    /// Gets a copy of the `Sender` that allows asynchronous communication with
+    /// a running robot. Requires taking a lock on the underlying state and thus
+    /// may fail if the lock is poisoned.
+    pub fn msg_sender(&self) -> Result<Sender<Message>, StateError> {
+        let state = try!(self.state.lock().map_err(|_| StateError::Poisoned));
+        Ok(state.msg_out.clone())
     }
 
-    /// Sends an input message to the robot, returning an error if the robot has
-    /// already stopped. The input is not guaranteed to be received if `stop()`
-    /// is called following this function.
-    pub fn send_input(&self, input: Ctl::Input) -> Result<(), SendError<Ctl::Input>> {
-        self.input_out.send(input)
+    /// Synchronously runs the robot. Should only be called once (from any
+    /// thread) and should usually be run in a new thread. See `rob::run_async`.
+    pub fn run(&self, tick_lock: &TickLock) -> Result<(), Error<Ctl>> {
+        use self::Message::*;
+
+        // Initialise in a block to make sure to drop the lock on the state when
+        // done.
+        {
+            // Get a lock on the state
+            let mut state = try!(self.state.lock().map_err(|_| Error::StatePoisoned));
+
+            try!(state.ctl.init().map_err(Error::Ctl));
+        }
+
+        let mut prev_time = Instant::now();
+
+        loop {
+            // Wait until we are allowed to tick
+            let _tick_guard = tick_lock.take();
+
+            // Get a lock on the state
+            let mut state = try!(self.state.lock().map_err(|_| Error::StatePoisoned));
+
+            // Handle any waiting messages
+            while let Ok(msg) = state.msg_in.try_recv() {
+                match msg {
+                    Shutdown => return Ok(()),
+                }
+            }
+
+            // Tell the `Ctl` to tick
+            let now = Instant::now();
+            try!(state.ctl.tick(now.duration_since(prev_time)).map_err(Error::Ctl));
+            prev_time = now;
+        }
     }
 
-    /// Asynchronously stops the robot's execution as soon as currently buffered
-    /// input messages have finished being handled. After one call to `stop()`,
-    /// subsequent calls have no effect.
-    pub fn stop(&self) {
-        self.stopper.stop();
+    /// Do something with the underlying `Ctl` object.
+    pub fn with_ctl<F, R>(&self, f: F) -> Result<R, StateError>
+        where F: FnOnce(&Ctl) -> R {
+
+        let state = try!(self.state.lock().map_err(|_| StateError::Poisoned));
+
+        Ok(f(&state.ctl))
     }
 
-    /// Get an object that can be used to asynchronously stop the robot's
-    /// execution as soon as currently buffered input messages have finished
-    /// being handled.
-    pub fn stopper(&self) -> RoboStopper {
-        self.stopper.clone()
-    }
+    /// Asynchronously runs the robot in a new thread.
+    ///
+    /// ```
+    /// use std::thread;
+    /// use std::sync::Arc;
+    ///
+    /// let robo = Arc::new(/* A robot */);
+    ///
+    /// run_async(robo.clone());
+    ///
+    /// // do other things
+    /// ```
+    pub fn run_async(robo: Arc<Robo<Ctl>>, tick_lock: Arc<TickLock>) -> thread::JoinHandle<Result<(), Error<Ctl>>>
+        where Ctl: Send + 'static {
 
-    /// Stops the robot's execution as soon as the currently buffered input
-    /// messages have finished being handled, and blocks until it has actually
-    /// stopped. Consumes the robot.
-    pub fn stop_wait(self) {
-        self.stop();
-        let _ = self.join_handle.join();
-    }
-
-    /// Blocks on an output message from the robot's asynchronous thread,
-    /// returning one when it arrives.
-    pub fn recv_output(&self) -> Result<Ctl::Output, RecvError> {
-        self.output_in.recv()
-    }
-
-    /// Checks if there is a waiting output message from the robot's
-    /// asynchronous thread, and returns it if so.
-    pub fn try_recv_output(&self) -> Result<Ctl::Output, TryRecvError> {
-        self.output_in.try_recv()
+        thread::spawn(move|| {
+            robo.run(&*tick_lock)
+        })
     }
 }
