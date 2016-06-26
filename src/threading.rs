@@ -2,14 +2,15 @@ use std::thread;
 use std::sync::mpsc::{channel, Sender, Receiver};
 
 use std::panic::{UnwindSafe, catch_unwind};
-use std::any::Any;
 
 /// A thread coordinator, which simplifies the coordination of many threads with
 /// the same return values.
 pub struct Coordinator<T> where T: Send + 'static {
     receiver: Receiver<Response<T>>,
     sender: Sender<Response<T>>,
-    handles: Vec<thread::JoinHandle<()>>,
+
+    count: usize,
+    count_active: usize,
 }
 
 impl<T> Coordinator<T> where T: Send + 'static {
@@ -20,7 +21,8 @@ impl<T> Coordinator<T> where T: Send + 'static {
         Coordinator {
             receiver: rx,
             sender: tx,
-            handles: Vec::new(),
+            count: 0,
+            count_active: 0,
         }
     }
 
@@ -29,10 +31,10 @@ impl<T> Coordinator<T> where T: Send + 'static {
     pub fn spawn<F>(&mut self, f: F)
         where F: FnOnce() -> T, F: Send + 'static + UnwindSafe {
 
-        let id = self.handles.len();
+        let id = self.count;
         let sender = self.sender.clone();
 
-        let handle = thread::spawn(move|| {
+        thread::spawn(move|| {
             let res = catch_unwind(f);
 
             sender.send(Response {
@@ -41,29 +43,44 @@ impl<T> Coordinator<T> where T: Send + 'static {
             }).expect("`Coordinator` object hung up");
         });
 
-        self.handles.push(handle);
+        self.count += 1;
+        self.count_active += 1;
     }
 
-    /// Waits until any of the running threads either completes or panics.
-    /// Returns either the result or panic value, then detaches all other
-    /// running threads (but does _not_ stop them).
-    pub fn wait_first(self) -> thread::Result<T> {
-        self.receiver.recv().expect("`Coordinator` object hung up").response
+    /// If there are any running threads, waits until any of them either
+    /// completes or panics. Returns either the result or panic value, then
+    /// detaches all other running threads (but does _not_ stop them).
+    ///
+    /// If there are no running threads, returns `None` instantly.
+    pub fn wait_next(&mut self) -> Option<thread::Result<T>> {
+        if self.count_active == 0 {
+            return None;
+        }
+
+        self.count_active -= 1;
+        Some(self.receiver.recv().expect("`Coordinator` object hung up").response)
     }
 
     /// Waits until all running threads have either completed or panicked.
     /// Results (or panic values) are returned in the order the threads were
     /// spawned.
-    pub fn wait_all(self) -> Vec<thread::Result<T>> {
-        let mut responses: Vec<_> = self.handles.iter().map(|_| {
-            Err(Box::new("Thread not responded".to_owned()) as Box<Any + 'static + Send>)
-        }).collect();
+    pub fn wait_all(self) -> Vec<Option<thread::Result<T>>> {
+        let mut responses: Vec<_> = (0..self.count).map(|_| None).collect();
 
-        for resp in self.receiver {
-            responses[resp.id] = resp.response;
+        for resp in self.receiver.into_iter().take(self.count_active) {
+            responses[resp.id] = Some(resp.response);
         }
 
         responses
+    }
+}
+
+/// Iterate over thread responses in the order the threads finish.
+impl<T> Iterator for Coordinator<T> where T: Send + 'static {
+    type Item = thread::Result<T>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.wait_next()
     }
 }
 

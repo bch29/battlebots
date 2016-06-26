@@ -18,8 +18,9 @@ pub struct BotState {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Message {
     Init { config: Config },
-    Tick { elapsed: f64 },
+    Step { elapsed: f64 },
     Scan { scan_pos: Vector2 },
+    Kill,
 }
 
 /// A response which can be received from the child process.

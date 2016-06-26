@@ -10,5 +10,7 @@ pub trait RoboCtl {
 
     fn tick(&mut self, elapsed: Duration) -> Result<(), Self::Error>;
 
+    fn kill(&mut self) -> Result<(), Self::Error>;
+
     fn public_data(&self) -> Self::PublicData;
 }

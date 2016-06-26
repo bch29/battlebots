@@ -15,6 +15,7 @@ use self::process::*;
 pub struct Ctl {
     id: u64,
     ticks_until_step: u32,
+    elapsed_since_step: f64,
     state: BotState,
     config: Config,
 
@@ -58,6 +59,7 @@ impl Ctl {
         Ctl {
             id: id,
             ticks_until_step: config.ticks_per_step,
+            elapsed_since_step: 0.0,
 
             state: BotState {
                 pos: initial_pos,
@@ -110,6 +112,8 @@ impl RoboCtl for Ctl {
 
         // Deal with external stepping
         self.ticks_until_step -= 1;
+        self.elapsed_since_step += elapsed;
+
         if self.ticks_until_step == 0 {
             self.ticks_until_step = self.config.ticks_per_step;
 
@@ -120,8 +124,8 @@ impl RoboCtl for Ctl {
 
                 self.relay.send_msg((
                     self.state.clone(),
-                    Message::Tick {
-                        elapsed: elapsed,
+                    Message::Step {
+                        elapsed: self.elapsed_since_step,
                     }))
             } else {
                 return Err(Error::SlowResponse);
@@ -137,6 +141,15 @@ impl RoboCtl for Ctl {
 
         let dir = Vector2::new(self.state.heading.cos(), self.state.heading.sin());
         self.state.pos += dir * self.state.speed * elapsed;
+
+        Ok(())
+    }
+
+    fn kill(&mut self) -> Result<(), Error> {
+        self.relay.send_msg((
+            self.state.clone(),
+            Message::Kill,
+        ));
 
         Ok(())
     }

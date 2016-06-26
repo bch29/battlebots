@@ -20,7 +20,7 @@ use std::panic::AssertUnwindSafe;
 fn main() {
     let config = Config::default();
 
-    let ctls: Vec<Ctl> = (0..100).map(|id| {
+    let ctls: Vec<Ctl> = (0..2).map(|id| {
         let child = Command::new(env::var("TESTPRG").unwrap())
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -34,7 +34,7 @@ fn main() {
 
     let tick_lock = Arc::new(TickLock::new(ctls.len()));
 
-    let world = World::new(config.clone(), ctls);
+    let (world, stop_world) = World::new(config.clone(), ctls);
 
     // the coordinator for the individual robots
     let mut robo_coord = Coordinator::new();
@@ -48,15 +48,17 @@ fn main() {
         });
     }
 
+    // This is a synchronised view into the current state of the robots, to give
+    // to the drawing thread.
     let robos_data = world.robos_data.clone();
 
     // the coordinator for drawing, world running, and robots
     let mut main_coord = Coordinator::new();
 
-    // Run the world in its own thread
+    // Run the world in its own coordinated thread
     {
         let mut world = AssertUnwindSafe(world);
-        let tick_lock = AssertUnwindSafe(tick_lock);
+        let tick_lock = AssertUnwindSafe(tick_lock.clone());
 
         main_coord.spawn(move|| {
             world.run(&*tick_lock).unwrap();
@@ -69,6 +71,7 @@ fn main() {
             use glium::DisplayBuild;
 
             let display = glutin::WindowBuilder::new()
+                .with_vsync()
                 .build_glium()
                 .unwrap();
 
@@ -100,12 +103,30 @@ fn main() {
 
     {
         let robo_coord = AssertUnwindSafe(robo_coord);
+
         main_coord.spawn(move|| {
-            // Keep going until any of the running robots stops with an error, and
-            // report the error.
-            robo_coord.0.wait_first().expect("Robot thread panicked").expect("Robo thread returned error");
+            // Keep going until the running robots stop. If they stop with an
+            // error, panic and report it.
+            for res in robo_coord.0 {
+                res.expect("Robot thread panicked").expect("Robo thread returned error");
+            }
         });
     }
 
-    main_coord.wait_first().expect("Drawing, world or robots thread panicked");
+    // Wait for the first of the drawing, world or robots thread to end. If
+    // there are no errors, this will always be the drawing thread (when the
+    // user closes the window).
+    main_coord.next().unwrap().expect("Drawing, world or robots thread panicked");
+
+    println!("Main thread exiting");
+
+    // If the world hasn't already stopped (which it shouldn't have unless there
+    // was a panic), tell it to stop. It will in turn tell each of the robots to
+    // stop.
+    let _ = stop_world.send(());
+
+    // Wait for other running threads to finish up.
+    for res in main_coord {
+        res.expect("Panic at shutdown.");
+    }
 }
