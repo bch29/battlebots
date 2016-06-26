@@ -32,7 +32,11 @@ impl RoboController for Ctl {
 }
 
 fn main() {
-    run(&mut Ctl { ticks: mk_rand(), reversing: false }).unwrap();
+    run(&mut Ctl {
+            ticks: mk_rand(),
+            reversing: false,
+        })
+        .unwrap();
 }
 
 #[inline]

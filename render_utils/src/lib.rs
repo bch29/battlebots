@@ -16,6 +16,7 @@ impl<'s, V, U> DataBuilder<'s, V, U>
     where V: glium::Vertex + Copy,
           U: IntoUniforms {
 
+    /// Build an `InstancedData` from the `DataBuilder`.
     pub fn build_instanced<F, I>(
         self,
         display: &F,
@@ -75,7 +76,11 @@ impl<V, I, U> InstancedData<V, I, U>
         params: &glium::DrawParameters)
         -> Result<(), glium::DrawError> {
 
-        surface.draw((&self.vertex_buf, self.instance_buf.per_instance().unwrap()), &self.index_buf, &self.program, &self.uniforms, params)
+        surface.draw((&self.vertex_buf, self.instance_buf.per_instance().unwrap()),
+                     &self.index_buf,
+                     &self.program,
+                     &self.uniforms,
+                     params)
     }
 }
 

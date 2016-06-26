@@ -1,34 +1,24 @@
 use config::Config;
-use world::{TickLock};
+use world::TickLock;
 use ctl::RoboCtl;
 
-use std::sync::{Arc, Mutex};
-
+use std::sync::{Arc, Mutex, PoisonError, MutexGuard};
 use std::thread;
-
 use std::time::Instant;
-
-#[derive(Debug)]
-struct State<Ctl: RoboCtl> {
-    ctl: Ctl,
-}
 
 /// An asynchronous robot, whose behaviour is determined by the `Ctl` type.
 pub struct Robo<Ctl: RoboCtl> {
+    #[allow(dead_code)]
     config: Config,
-    state: Mutex<State<Ctl>>,
+    state: Mutex<Ctl>,
 }
 
 #[derive(Debug)]
-pub enum Error<Ctl: RoboCtl> {
+pub enum Error<Ctl>
+    where Ctl: RoboCtl
+{
     StatePoisoned,
-    WorldPoisoned,
     Ctl(Ctl::Error),
-}
-
-#[derive(Debug)]
-pub enum StateError {
-    Poisoned
 }
 
 impl<Ctl: RoboCtl> Robo<Ctl> {
@@ -37,7 +27,7 @@ impl<Ctl: RoboCtl> Robo<Ctl> {
     pub fn new(config: Config, ctl: Ctl) -> Self {
         Robo {
             config: config,
-            state: Mutex::new(State { ctl: ctl }),
+            state: Mutex::new(ctl),
         }
     }
 
@@ -48,9 +38,9 @@ impl<Ctl: RoboCtl> Robo<Ctl> {
         // done.
         {
             // Get a lock on the state
-            let mut state = try!(self.state.lock().map_err(|_| Error::StatePoisoned));
+            let mut state = try!(self.state.lock());
 
-            try!(state.ctl.init().map_err(Error::Ctl));
+            try!(state.init().map_err(Error::Ctl));
         }
 
         let mut prev_time = Instant::now();
@@ -59,30 +49,28 @@ impl<Ctl: RoboCtl> Robo<Ctl> {
             // Wait until we are allowed to tick
             if let Some(_tick_guard) = tick_lock.take() {
                 // Get a lock on the state
-                let mut state = try!(self.state.lock().map_err(|_| Error::StatePoisoned));
+                let mut state = try!(self.state.lock());
 
                 // Tell the `Ctl` to tick
                 let now = Instant::now();
-                try!(state.ctl.tick(now.duration_since(prev_time)).map_err(Error::Ctl));
+                try!(state.tick(now.duration_since(prev_time)).map_err(Error::Ctl));
                 prev_time = now;
             } else {
                 // Get a lock on the state
-                let mut state = try!(self.state.lock().map_err(|_| Error::StatePoisoned));
+                let mut state = try!(self.state.lock());
 
-                try!(state.ctl.kill().map_err(Error::Ctl));
-                println!("Robo exiting");
-                return Ok(())
+                try!(state.kill().map_err(Error::Ctl));
+                return Ok(());
             }
         }
     }
 
     /// Do something with the underlying `Ctl` object.
-    pub fn with_ctl<F, R>(&self, f: F) -> Result<R, StateError>
-        where F: FnOnce(&Ctl) -> R {
+    pub fn with_ctl<F, R>(&self, f: F) -> Result<R, Error<Ctl>>
+        where F: FnOnce(&Ctl) -> R
+    {
 
-        let state = try!(self.state.lock().map_err(|_| StateError::Poisoned));
-
-        Ok(f(&state.ctl))
+        self.state.lock().map(|ctl| f(&*ctl)).map_err(Into::into)
     }
 
     /// Asynchronously runs the robot in a new thread.
@@ -97,11 +85,21 @@ impl<Ctl: RoboCtl> Robo<Ctl> {
     ///
     /// // do other things
     /// ```
-    pub fn run_async(robo: Arc<Robo<Ctl>>, tick_lock: Arc<TickLock>) -> thread::JoinHandle<Result<(), Error<Ctl>>>
-        where Ctl: Send + 'static {
+    pub fn run_async(robo: Arc<Robo<Ctl>>,
+                     tick_lock: Arc<TickLock>)
+                     -> thread::JoinHandle<Result<(), Error<Ctl>>>
+        where Ctl: Send + 'static
+    {
 
-        thread::spawn(move|| {
-            robo.run(&*tick_lock)
-        })
+        thread::spawn(move || robo.run(&*tick_lock))
+    }
+}
+
+// Can't implement From<Ctl::Error> without specialisation.
+impl<'a, Ctl> From<PoisonError<MutexGuard<'a, Ctl>>> for Error<Ctl>
+    where Ctl: RoboCtl
+{
+    fn from(_: PoisonError<MutexGuard<Ctl>>) -> Self {
+        Error::StatePoisoned
     }
 }

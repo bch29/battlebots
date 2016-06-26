@@ -5,7 +5,9 @@ use std::panic::{UnwindSafe, catch_unwind};
 
 /// A thread coordinator, which simplifies the coordination of many threads with
 /// the same return values.
-pub struct Coordinator<T> where T: Send + 'static {
+pub struct Coordinator<T>
+    where T: Send + 'static
+{
     receiver: Receiver<Response<T>>,
     sender: Sender<Response<T>>,
 
@@ -13,7 +15,9 @@ pub struct Coordinator<T> where T: Send + 'static {
     count_active: usize,
 }
 
-impl<T> Coordinator<T> where T: Send + 'static {
+impl<T> Coordinator<T>
+    where T: Send + 'static
+{
     /// Creates a new, initially empty, thread coordinator.
     pub fn new() -> Self {
         let (tx, rx) = channel();
@@ -29,18 +33,21 @@ impl<T> Coordinator<T> where T: Send + 'static {
     /// Adds a task to the thread coordinator which runs the provided closure,
     /// starting it immediately.
     pub fn spawn<F>(&mut self, f: F)
-        where F: FnOnce() -> T, F: Send + 'static + UnwindSafe {
+        where F: FnOnce() -> T,
+              F: Send + 'static + UnwindSafe
+    {
 
         let id = self.count;
         let sender = self.sender.clone();
 
-        thread::spawn(move|| {
+        thread::spawn(move || {
             let res = catch_unwind(f);
 
             sender.send(Response {
-                id: id,
-                response: res,
-            }).expect("`Coordinator` object hung up");
+                    id: id,
+                    response: res,
+                })
+                .expect("`Coordinator` object hung up");
         });
 
         self.count += 1;
@@ -76,7 +83,9 @@ impl<T> Coordinator<T> where T: Send + 'static {
 }
 
 /// Iterate over thread responses in the order the threads finish.
-impl<T> Iterator for Coordinator<T> where T: Send + 'static {
+impl<T> Iterator for Coordinator<T>
+    where T: Send + 'static
+{
     type Item = thread::Result<T>;
 
     fn next(&mut self) -> Option<Self::Item> {

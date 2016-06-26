@@ -19,7 +19,7 @@ pub enum ProcessError {
     Serialization(JsonError),
     Deserialization(JsonError),
     Writing(io::Error),
-    Reading(io::Error)
+    Reading(io::Error),
 }
 
 pub struct Relay {
@@ -41,7 +41,10 @@ impl<R, W> Process<R, W> {
     }
 }
 
-impl<R, W> Process<R, W> where R: BufRead, W: Write {
+impl<R, W> Process<R, W>
+    where R: BufRead,
+          W: Write
+{
     pub fn run(mut self) -> Result<(), ProcessError> {
         loop {
             // Relay a waiting message from the queue to the child process
@@ -52,7 +55,8 @@ impl<R, W> Process<R, W> where R: BufRead, W: Write {
             // Receive a list of responses from the child process
             let mut next_line = String::new();
             try!(self.input_reader.read_line(&mut next_line).map_err(ProcessError::Reading));
-            let resps = try!(serde_json::from_str(next_line.as_str()).map_err(ProcessError::Deserialization));
+            let resps = try!(serde_json::from_str(next_line.as_str())
+                .map_err(ProcessError::Deserialization));
             self.relay.send_resps(resps);
         }
     }
@@ -80,5 +84,11 @@ impl Relay {
 
     fn recv_msg(&self) -> (BotState, Message) {
         self.msg_queue.pop()
+    }
+}
+
+impl Default for Relay {
+    fn default() -> Self {
+        Relay::new()
     }
 }

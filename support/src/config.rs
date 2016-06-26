@@ -3,15 +3,29 @@ use std::time::Duration;
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub struct Config {
+
+    /// The size of the world.
     pub world_size: Vector2,
-    pub max_bots: u32,
-    pub fps: u32,
+
+    /// The frame rate of the simulation (but not necessarily the rendering).
+    pub ticks_per_second: u32,
+
+    /// The number of ticks between each external step.
     pub ticks_per_step: u32,
 
+    /// The multiplicative friction per tick for robots.
     pub drive_friction: f64,
+
+    /// The range of allowed thrust values.
     pub thrust_limits: Clamped<f64>,
+
+    /// The range of allowed turn rate values.
     pub turn_rate_limits: Clamped<f64>,
+
+    /// The range of allowed gun turn rate values.
     pub gun_turn_rate_limits: Clamped<f64>,
+
+    /// The range of allowed radar turn rate values.
     pub radar_turn_rate_limits: Clamped<f64>,
 }
 
@@ -20,9 +34,7 @@ impl Default for Config {
         Config {
             world_size: Vector2::new(100.0, 100.0),
 
-            max_bots: 200,
-
-            fps: 60,
+            ticks_per_second: 60,
 
             ticks_per_step: 5,
 
@@ -36,13 +48,9 @@ impl Default for Config {
 }
 
 impl Config {
-    pub fn set_fps(&mut self, fps: u32) -> &mut Config {
-        self.fps = fps;
-        self
-    }
-
+    /// Calculate the length of a tick as a `Duration` based on the `ticks_per_second`.
     pub fn tick_duration(&self) -> Duration {
-        let exact = 1.0 / self.fps as f64;
+        let exact = 1.0 / self.ticks_per_second as f64;
         let nanos = (exact * 1_000_000_000.0) as u32;
         Duration::new(0, nanos)
     }

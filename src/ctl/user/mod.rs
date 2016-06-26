@@ -26,7 +26,9 @@ use std::fmt;
 
 impl fmt::Debug for Ctl {
     fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
-        write!(f, "Ctl {{ id: {}, ticks_until_steps: {}, state: {:?}, config: {:?}, relay: ?, join_handle: ? }}",
+        write!(f,
+               "Ctl {{ id: {}, ticks_until_steps: {}, state: {:?}, config: {:?}, relay: ?, \
+                join_handle: ? }}",
                self.id,
                self.ticks_until_step,
                self.state,
@@ -46,25 +48,27 @@ pub enum Error {
 }
 
 impl Ctl {
-    pub fn new<R, W>(id: u64, initial_pos: Vector2, config: Config, output_writer: W, input_reader: R) -> Self
-        where R: Read + Send + 'static, W: Write + Send + 'static {
+    pub fn new<R, W>(id: u64,
+                     initial_pos: Vector2,
+                     config: Config,
+                     output_writer: W,
+                     input_reader: R)
+                     -> Self
+        where R: Read + Send + 'static,
+              W: Write + Send + 'static
+    {
 
         let process = Process::new(output_writer, BufReader::new(input_reader));
         let relay = process.relay();
 
-        thread::spawn(move|| {
-            process.run()
-        });
+        thread::spawn(move || process.run());
 
         Ctl {
             id: id,
             ticks_until_step: config.ticks_per_step,
             elapsed_since_step: 0.0,
 
-            state: BotState {
-                pos: initial_pos,
-                .. BotState::default()
-            },
+            state: BotState { pos: initial_pos, ..BotState::default() },
 
             config: config,
 
@@ -77,14 +81,21 @@ impl Ctl {
         use self::Error::*;
 
         match resp {
-            SetThrust(x) => self.state.thrust =
-                try!(self.config.thrust_limits.check(x).map_err(BadThrust)),
-            SetTurnRate(x) => self.state.turn_rate =
-                try!(self.config.turn_rate_limits.check(x).map_err(BadTurnRate)),
-            SetGunTurnRate(x) => self.state.gun_turn_rate =
-                try!(self.config.gun_turn_rate_limits.check(x).map_err(BadGunTurnRate)),
-            SetRadarTurnRate(x) => self.state.radar_turn_rate =
-                try!(self.config.radar_turn_rate_limits.check(x).map_err(BadRadarTurnRate)),
+            SetThrust(x) => {
+                self.state.thrust = try!(self.config.thrust_limits.check(x).map_err(BadThrust))
+            }
+            SetTurnRate(x) => {
+                self.state.turn_rate =
+                    try!(self.config.turn_rate_limits.check(x).map_err(BadTurnRate))
+            }
+            SetGunTurnRate(x) => {
+                self.state.gun_turn_rate =
+                    try!(self.config.gun_turn_rate_limits.check(x).map_err(BadGunTurnRate))
+            }
+            SetRadarTurnRate(x) => {
+                self.state.radar_turn_rate =
+                    try!(self.config.radar_turn_rate_limits.check(x).map_err(BadRadarTurnRate))
+            }
 
             DebugPrint(msg) => println!("Bot {}: {}", self.id, msg),
         }
@@ -98,11 +109,7 @@ impl RoboCtl for Ctl {
     type Error = Error;
 
     fn init(&mut self) -> Result<(), Error> {
-        self.relay.send_msg((
-            self.state.clone(),
-            Message::Init {
-                config: self.config.clone(),
-            }));
+        self.relay.send_msg((self.state.clone(), Message::Init { config: self.config.clone() }));
 
         Ok(())
     }
@@ -122,11 +129,8 @@ impl RoboCtl for Ctl {
                     try!(self.apply_resp(resp))
                 }
 
-                self.relay.send_msg((
-                    self.state.clone(),
-                    Message::Step {
-                        elapsed: self.elapsed_since_step,
-                    }))
+                self.relay.send_msg((self.state.clone(),
+                                     Message::Step { elapsed: self.elapsed_since_step }))
             } else {
                 return Err(Error::SlowResponse);
             }
@@ -146,10 +150,7 @@ impl RoboCtl for Ctl {
     }
 
     fn kill(&mut self) -> Result<(), Error> {
-        self.relay.send_msg((
-            self.state.clone(),
-            Message::Kill,
-        ));
+        self.relay.send_msg((self.state.clone(), Message::Kill));
 
         Ok(())
     }
