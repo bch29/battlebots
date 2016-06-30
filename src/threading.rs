@@ -82,7 +82,8 @@ impl<T> Coordinator<T>
     }
 }
 
-/// Iterate over thread responses in the order the threads finish.
+/// Iterate over thread responses in the order the threads finish. See the
+/// documentation for `wait_next`.
 impl<T> Iterator for Coordinator<T>
     where T: Send + 'static
 {

@@ -1,8 +1,8 @@
 #!/bin/fish
 
-cargo build; and begin
+cargo build --release; and begin
 set_color yellow
 echo "  OUTPUT:"
 set_color normal
-env TESTPRG=target/debug/example cargo run --bin battlebots
+env TESTPRG=target/debug/example cargo run --release --bin battlebots
 end

@@ -102,6 +102,17 @@ impl RoboHook {
         self.resps.push(Response::SetRadarTurnRate(new_radar_turn_rate));
     }
 
+    /// Shoot a bullet with the given power, and consume that power. If outside
+    /// the range specified by `bullet_power_limits` in the configuration, clamp
+    /// to that range. Will cause an error if called more than once in a single
+    /// step. Will do nothing if called when the robot's current shoot power is
+    /// less than the provided power.
+    #[inline]
+    pub fn shoot(&mut self, power: f64) {
+        let power = self.config().bullet_power_limits.clamp(power);
+        self.resps.push(Response::Shoot(power));
+    }
+
     /// Print the provided message to the simulation console.
     #[inline]
     pub fn debug_print(&mut self, msg: &str) {

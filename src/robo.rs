@@ -10,14 +10,14 @@ use std::time::Instant;
 pub struct Robo<Ctl: RoboCtl> {
     #[allow(dead_code)]
     config: Config,
-    state: Mutex<Ctl>,
+    ctl: Mutex<Ctl>,
 }
 
 #[derive(Debug)]
 pub enum Error<Ctl>
     where Ctl: RoboCtl
 {
-    StatePoisoned,
+    CtlPoisoned,
     Ctl(Ctl::Error),
 }
 
@@ -27,20 +27,20 @@ impl<Ctl: RoboCtl> Robo<Ctl> {
     pub fn new(config: Config, ctl: Ctl) -> Self {
         Robo {
             config: config,
-            state: Mutex::new(ctl),
+            ctl: Mutex::new(ctl),
         }
     }
 
     /// Synchronously runs the robot. Should only be called once (from any
     /// thread) and should usually be run in a new thread. See `rob::run_async`.
     pub fn run(&self, tick_lock: &TickLock) -> Result<(), Error<Ctl>> {
-        // Initialise in a block to make sure to drop the lock on the state when
+        // Initialise in a block to make sure to drop the lock on the ctl when
         // done.
         {
-            // Get a lock on the state
-            let mut state = try!(self.state.lock());
+            // Get a lock on the ctl
+            let mut ctl = try!(self.ctl.lock());
 
-            try!(state.init().map_err(Error::Ctl));
+            try!(ctl.init().map_err(Error::Ctl));
         }
 
         let mut prev_time = Instant::now();
@@ -48,18 +48,19 @@ impl<Ctl: RoboCtl> Robo<Ctl> {
         loop {
             // Wait until we are allowed to tick
             if let Some(_tick_guard) = tick_lock.take() {
-                // Get a lock on the state
-                let mut state = try!(self.state.lock());
+                // Get a lock on the ctl
+                let mut ctl = try!(self.ctl.lock());
 
                 // Tell the `Ctl` to tick
                 let now = Instant::now();
-                try!(state.tick(now.duration_since(prev_time)).map_err(Error::Ctl));
+                try!(ctl.tick(now.duration_since(prev_time)).map_err(Error::Ctl));
                 prev_time = now;
             } else {
-                // Get a lock on the state
-                let mut state = try!(self.state.lock());
+                // Get a lock on the ctl
+                let mut ctl = try!(self.ctl.lock());
 
-                try!(state.kill().map_err(Error::Ctl));
+                // Kill the robot
+                try!(ctl.kill().map_err(Error::Ctl));
                 return Ok(());
             }
         }
@@ -70,7 +71,7 @@ impl<Ctl: RoboCtl> Robo<Ctl> {
         where F: FnOnce(&Ctl) -> R
     {
 
-        self.state.lock().map(|ctl| f(&*ctl)).map_err(Into::into)
+        self.ctl.lock().map(|ctl| f(&*ctl)).map_err(Into::into)
     }
 
     /// Asynchronously runs the robot in a new thread.
@@ -100,6 +101,6 @@ impl<'a, Ctl> From<PoisonError<MutexGuard<'a, Ctl>>> for Error<Ctl>
     where Ctl: RoboCtl
 {
     fn from(_: PoisonError<MutexGuard<Ctl>>) -> Self {
-        Error::StatePoisoned
+        Error::CtlPoisoned
     }
 }

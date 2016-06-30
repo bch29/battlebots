@@ -32,6 +32,12 @@ pub struct BotState {
 
     /// The rate of rotation of the radar, relative to the robot.
     pub radar_turn_rate: f64,
+
+    /// The bot's hit points. When this reaches zero, the bot dies.
+    pub hit_points: f64,
+
+    /// Shooting requires shoot power. It regenerates over time.
+    pub shoot_power: f64
 }
 
 /// A message which can be sent to the child process.
@@ -78,6 +84,10 @@ pub enum Response {
     /// Set the radar turn rate. Causes an error if the value is not within the
     /// range specified by `radar_turn_rate_limits` in the configuration.
     SetRadarTurnRate(f64),
+
+    /// Fire a bullet in the direction the gun is currently heading, with the
+    /// given power. Only one shoot command may be issued per frame.
+    Shoot(f64),
 
     /// Print a message to the simulation console.
     DebugPrint(String),

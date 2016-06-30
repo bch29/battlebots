@@ -7,22 +7,25 @@ use std::time::Duration;
 use std::sync::Arc;
 use std::io::{BufReader, Read, Write};
 use std::thread;
+use std::fmt;
 
-pub mod process;
+mod process;
 
 use self::process::*;
 
+/// Controller for a user's robot, based on an external process.
 pub struct Ctl {
     id: u64,
     ticks_until_step: u32,
     elapsed_since_step: f64,
+
+    next_shot_power: Option<f64>,
+
     state: BotState,
     config: Config,
 
     relay: Arc<Relay>,
 }
-
-use std::fmt;
 
 impl fmt::Debug for Ctl {
     fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
@@ -45,6 +48,7 @@ pub enum Error {
     BadTurnRate(f64),
     BadGunTurnRate(f64),
     BadRadarTurnRate(f64),
+    TooManyBulletsPerFrame,
 }
 
 impl Ctl {
@@ -55,11 +59,9 @@ impl Ctl {
                      input_reader: R)
                      -> Self
         where R: Read + Send + 'static,
-              W: Write + Send + 'static
-    {
+              W: Write + Send + 'static {
 
-        let process = Process::new(output_writer, BufReader::new(input_reader));
-        let relay = process.relay();
+        let (process, relay) = Process::new(output_writer, BufReader::new(input_reader));
 
         thread::spawn(move || process.run());
 
@@ -67,15 +69,16 @@ impl Ctl {
             id: id,
             ticks_until_step: config.ticks_per_step,
             elapsed_since_step: 0.0,
+            next_shot_power: None,
 
             state: BotState { pos: initial_pos, ..BotState::default() },
-
             config: config,
 
             relay: relay,
         }
     }
 
+    /// Perform the effects of a single response.
     fn apply_resp(&mut self, resp: Response) -> Result<(), Error> {
         use rpc::Response::*;
         use self::Error::*;
@@ -84,17 +87,28 @@ impl Ctl {
             SetThrust(x) => {
                 self.state.thrust = try!(self.config.thrust_limits.check(x).map_err(BadThrust))
             }
+
             SetTurnRate(x) => {
                 self.state.turn_rate =
                     try!(self.config.turn_rate_limits.check(x).map_err(BadTurnRate))
             }
+
             SetGunTurnRate(x) => {
                 self.state.gun_turn_rate =
                     try!(self.config.gun_turn_rate_limits.check(x).map_err(BadGunTurnRate))
             }
+
             SetRadarTurnRate(x) => {
                 self.state.radar_turn_rate =
                     try!(self.config.radar_turn_rate_limits.check(x).map_err(BadRadarTurnRate))
+            }
+
+            Shoot(power) => {
+                if self.next_shot_power.is_none() {
+                    self.next_shot_power = Some(power);
+                } else {
+                    return Err(TooManyBulletsPerFrame)
+                }
             }
 
             DebugPrint(msg) => println!("Bot {}: {}", self.id, msg),
@@ -117,7 +131,9 @@ impl RoboCtl for Ctl {
     fn tick(&mut self, elapsed: Duration) -> Result<(), Error> {
         let elapsed = duration_float(elapsed);
 
-        // Deal with external stepping
+        // Deal with external stepping. We use an asynchronous `Process` for
+        // this so that we don't block the simulation while the robot is doing
+        // its calculations for this step.
         self.ticks_until_step -= 1;
         self.elapsed_since_step += elapsed;
 
@@ -132,6 +148,8 @@ impl RoboCtl for Ctl {
                 self.relay.send_msg((self.state.clone(),
                                      Message::Step { elapsed: self.elapsed_since_step }))
             } else {
+                // TODO: Consider making this optionally not throw an error, or
+                // maybe only throw after blocking for longer.
                 return Err(Error::SlowResponse);
             }
         }
@@ -155,8 +173,8 @@ impl RoboCtl for Ctl {
         Ok(())
     }
 
-    fn public_data(&self) -> BotState {
-        self.state.clone()
+    fn public_data(&self) -> &BotState {
+        &self.state
     }
 }
 

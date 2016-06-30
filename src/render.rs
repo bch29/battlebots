@@ -1,3 +1,6 @@
+//! This module abstracts over the hard bits of drawing the world and robots
+//! with OpenGL.
+
 use math::*;
 use rpc::*;
 
@@ -15,6 +18,7 @@ use std::sync::{Arc, Mutex};
 type Data =
     InstancedData<Vertex, Attr, <GlobalUniforms as IntoUniforms>::IntoUniforms>;
 
+/// Encapsulates state required for drawing the world and robots.
 pub struct DrawState {
     body_data: Data,
     radar_data: Data,
@@ -23,6 +27,7 @@ pub struct DrawState {
     bots: Arc<Mutex<Vec<BotState>>>,
 }
 
+/// Why does `cgmath` not provide this?
 fn mat_3_to_4<S: Copy + Zero + One>(mat: Matrix3<S>) -> Matrix4<S> {
     let cols: [[S; 3]; 3] = mat.into();
 
@@ -42,6 +47,8 @@ impl DrawState {
         let num_bots = {
             bots.lock().unwrap().len()
         };
+
+        // TODO: Scale based on configuration.
 
         let body = DataBuilder {
             vertices: vec![
@@ -87,6 +94,8 @@ impl DrawState {
         }
     }
 
+    /// Update GPU memory to synchronise with the current state of the world and
+    /// robots.
     pub fn update(&mut self) {
         let bots = {
             let bots = self.bots.lock().unwrap();
@@ -117,6 +126,8 @@ impl DrawState {
         update_one(&mut self.gun_data, &bots, |bot| (bot.gun_heading, bot.pos));
     }
 
+    /// Issue the OpenGL draw calls to draw the world for this frame. Should
+    /// usually call `update` first.
     pub fn draw<S>(&self, surface: &mut S, params: &DrawParameters) -> Result<(), DrawError>
         where S: Surface
     {

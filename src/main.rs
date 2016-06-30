@@ -51,7 +51,7 @@ fn main() {
     let mut robo_coord = Coordinator::new();
 
     // Spawn each robot in its own coordinated thread
-    for robo in &world.all_robos {
+    for robo in world.all_robos() {
         let robo = AssertUnwindSafe(robo.clone());
         let tick_lock = AssertUnwindSafe(tick_lock.clone());
 
@@ -60,7 +60,7 @@ fn main() {
 
     // This is a synchronised view into the current state of the robots, to give
     // to the drawing thread.
-    let robos_data = world.robos_data.clone();
+    let robos_data = world.robos_data();
 
     // the coordinator for drawing, world running, and robots
     let mut main_coord = Coordinator::new();

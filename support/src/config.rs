@@ -27,6 +27,18 @@ pub struct Config {
 
     /// The range of allowed radar turn rate values.
     pub radar_turn_rate_limits: Clamped<f64>,
+
+    /// Each robot's starting, and maximum, hit points.
+    pub max_hit_points: f64,
+
+    /// Each robot's starting, and maximum, shoot power.
+    pub max_shoot_power: f64,
+
+    /// How much shoot power each robot gets back on every tick.
+    pub shoot_power_per_tick: f64,
+
+    /// The range of allowed power settings for bullets.
+    pub bullet_power_limits: Clamped<f64>,
 }
 
 impl Default for Config {
@@ -43,6 +55,11 @@ impl Default for Config {
             turn_rate_limits: Clamped::new(-2.0, 2.0),
             gun_turn_rate_limits: Clamped::new(-2.0, 2.0),
             radar_turn_rate_limits: Clamped::new(-2.0, 2.0),
+
+            max_hit_points: 100.0,
+            max_shoot_power: 100.0,
+            shoot_power_per_tick: 100.0,
+            bullet_power_limits: Clamped::new(1.0, 5.0),
         }
     }
 }

@@ -41,5 +41,6 @@ fn main() {
 
 #[inline]
 fn mk_rand() -> u32 {
-    (rand::random::<u32>() % 20) + 16
+    // (rand::random::<u32>() % 20) + 16
+    24
 }

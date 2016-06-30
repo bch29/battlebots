@@ -8,9 +8,10 @@ use std::thread;
 use std::time::Instant;
 use std::fmt::Debug;
 
+/// A world in which a robot battle takes place.
 pub struct World<Ctl: RoboCtl> {
-    pub all_robos: Vec<Arc<Robo<Ctl>>>,
-    pub robos_data: Arc<Mutex<Vec<Ctl::PublicData>>>,
+    all_robos: Vec<Arc<Robo<Ctl>>>,
+    robos_data: Arc<Mutex<Vec<Ctl::PublicData>>>,
     tick_lock: Arc<TickLock>,
     config: Config,
     stop_receiver: Receiver<()>,
@@ -32,7 +33,7 @@ impl<Ctl: RoboCtl + Debug> World<Ctl> {
 
         (World {
             robos_data: Arc::new(Mutex::new(all_robos.iter()
-                .map(|robo| robo.with_ctl(|ctl| ctl.public_data()).unwrap())
+                .map(|robo| robo.with_ctl(|ctl| ctl.public_data().clone()).unwrap())
                 .collect())),
 
             all_robos: all_robos,
@@ -42,6 +43,16 @@ impl<Ctl: RoboCtl + Debug> World<Ctl> {
         },
          tick_lock,
          stop_sender)
+    }
+
+    /// Get the list of robots so they can be run.
+    pub fn all_robos(&self) -> &[Arc<Robo<Ctl>>] {
+        self.all_robos.as_slice()
+    }
+
+    /// Get the mutex-protected robot data so that it can be drawn.
+    pub fn robos_data(&self) -> Arc<Mutex<Vec<Ctl::PublicData>>> {
+        self.robos_data.clone()
     }
 
     /// Synchronously runs a world. Each of the contained robots must already be
@@ -62,7 +73,7 @@ impl<Ctl: RoboCtl + Debug> World<Ctl> {
 
                 *robos_data = self.all_robos
                     .iter()
-                    .map(|robo| robo.with_ctl(|ctl| ctl.public_data()).unwrap())
+                    .map(|robo| robo.with_ctl(|ctl| ctl.public_data().clone()).unwrap())
                     .collect();
             }
 
@@ -86,58 +97,75 @@ impl<Ctl: RoboCtl + Debug> World<Ctl> {
     }
 }
 
+// =============================================================================
+//  Tick locks. Very hairy synchronisation, probably don't touch this.
+// =============================================================================
+
+/// A lock object used to coordinate the world's and the robots' ticks, so that
+/// none gets ahead of any others.
 pub struct TickLock {
-    start_bar: Barrier,
-    end_bar: Barrier,
+    barrier: Barrier,
     is_running: RwLock<bool>,
 }
 
+/// An RAII guard indicating that we are in the process of ticking. The tick
+/// ends when the `TickGuard` is dropped.
 pub struct TickGuard<'a> {
-    end_bar: &'a Barrier,
+    barrier: &'a Barrier,
+
+    // A reference to the `is_running` lock is kept so that a thread can stop
+    // the world via the guard.
     is_running: &'a RwLock<bool>,
+
+    // A guard on the `is_running` lock is kept so that the world can't
+    // be stopped while some threads are still ticking.
     running_guard: Option<RwLockReadGuard<'a, bool>>,
 }
 
 impl TickLock {
     fn new(size: usize) -> Self {
         TickLock {
-            start_bar: Barrier::new(size + 1),
-            end_bar: Barrier::new(size + 1),
+            barrier: Barrier::new(size + 1),
             is_running: RwLock::new(true),
         }
     }
 
     /// Try to take the lock. If the world is running, wait until we are allowed
-    /// to tick and return the guard. Otherwise, return `None`.
+    /// to tick and return the RAII guard. Otherwise, return `None`.
     pub fn take(&self) -> Option<TickGuard> {
 
+        // First check that the world is running and return straight away if
+        // not. Importantly, keep hold of the lock to make sure the world can't
+        // be stopped before this tick is complete.
         let running = self.is_running.read().unwrap();
         if !*running {
             return None;
         }
 
-        self.start_bar.wait();
+        // Wait until all threads are at this point before allowing any to have
+        // the guard.
+        self.barrier.wait();
 
         Some(TickGuard {
-            end_bar: &self.end_bar,
+            barrier: &self.barrier,
             is_running: &self.is_running,
             running_guard: Some(running),
         })
     }
-
-    /// Stop the world. This will always block until no thread has a guard on
-    /// this lock (and hence will cause a deadlock if called by a thread that
-    /// already has a guard on this lock).
-    pub fn stop_world(&self) {
-        *self.is_running.write().unwrap() = false
-    }
 }
 
 impl<'a> TickGuard<'a> {
-    /// Stop the world.
+    /// Stop the world. This will wait until all other threads are done with
+    /// their current `TickGuard`s, then make sure no `TickGuard`s can be taken
+    /// in the future. This is private because only the world can stop itself.
     fn stop(&mut self) {
+        // Drop the running read guard so that the write lock can be taken.
         self.running_guard = None;
 
+        // Take the write lock on `is_running`. Due to the presence of
+        // `running_guard` in each `TickGuard`, this also waits until all
+        // `TickGuard`s but this one have been dropped, and hence all other
+        // threads have finished ticking.
         let mut running = self.is_running.write().unwrap();
         *running = false;
     }
@@ -148,6 +176,6 @@ impl<'a> Drop for TickGuard<'a> {
         // Make sure the running guard is dropped first so we don't block a
         // thread that wants to stop the world.
         self.running_guard = None;
-        self.end_bar.wait();
+        self.barrier.wait();
     }
 }
