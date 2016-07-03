@@ -8,13 +8,25 @@ use std::thread;
 use std::time::Instant;
 use std::fmt::Debug;
 
+pub struct Bullet {
+    pub pos: Vector2,
+    pub vel: Vector2,
+    pub power: f64,
+}
+
+pub struct WorldData<Ctl: RoboCtl> {
+    robos_data: Vec<Ctl::PublicData>,
+    bullets: Vec<Bullet>,
+}
+
 /// A world in which a robot battle takes place.
 pub struct World<Ctl: RoboCtl> {
     all_robos: Vec<Arc<Robo<Ctl>>>,
-    robos_data: Arc<Mutex<Vec<Ctl::PublicData>>>,
+    data: Arc<Mutex<WorldData<Ctl>>>,
     tick_lock: Arc<TickLock>,
     config: Config,
     stop_receiver: Receiver<()>,
+    bullets_in: Receiver<Bullet>,
 }
 
 impl<Ctl: RoboCtl + Debug> World<Ctl> {
